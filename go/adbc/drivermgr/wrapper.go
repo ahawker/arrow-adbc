@@ -194,7 +194,7 @@ func (d *Database) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.closed {
+	if d.closed || d.db == nil {
 		return nil
 	}
 
@@ -235,6 +235,9 @@ func getSchema(out *C.struct_ArrowSchema) (*arrow.Schema, error) {
 
 type cnxn struct {
 	conn *C.struct_AdbcConnection
+
+	mu     sync.Mutex // protects following fields
+	closed bool
 }
 
 func (c *cnxn) GetInfo(_ context.Context, infoCodes []adbc.InfoCode) (array.RecordReader, error) {
@@ -377,6 +380,15 @@ func (c *cnxn) NewStatement() (adbc.Statement, error) {
 }
 
 func (c *cnxn) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed || c.conn == nil {
+		return nil
+	}
+
+	c.closed = true
+
 	var err C.struct_AdbcError
 	if code := adbc.Status(C.AdbcConnectionRelease(c.conn, &err)); code != adbc.StatusOK {
 		return toAdbcError(code, &err)
@@ -402,9 +414,21 @@ func (c *cnxn) SetOption(key, value string) error {
 
 type stmt struct {
 	st *C.struct_AdbcStatement
+
+	mu     sync.Mutex // protects following fields
+	closed bool
 }
 
 func (s *stmt) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed || s.st == nil {
+		return nil
+	}
+
+	s.closed = true
+
 	var err C.struct_AdbcError
 	if code := adbc.Status(C.AdbcStatementRelease(s.st, &err)); code != adbc.StatusOK {
 		return toAdbcError(code, &err)
